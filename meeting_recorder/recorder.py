@@ -45,8 +45,8 @@ class RecordingResult:
 def _find_pipewire_nodes() -> dict[str, str | None]:
     """Descubre los nodos de PipeWire disponibles.
 
-    Busca el nodo de micrófono (fuente de entrada) y el monitor del sink
-    (salida de aplicaciones) usando pw-cli.
+    Busca el nodo de micrófono (fuente de entrada) y el sink de salida
+    (para capturar su monitor) usando pw-cli.
 
     Returns:
         Diccionario con claves 'microphone' y 'monitor', valores son los
@@ -64,25 +64,31 @@ def _find_pipewire_nodes() -> dict[str, str | None]:
         if result.returncode != 0:
             return nodes
 
-        # Buscar nodos de tipo Source (micrófono) y Source/Monitor (monitor del sink)
+        # Parsear nodos buscando media.class y node.name
         current_node: dict = {}
         for line in result.stdout.splitlines():
             line = line.strip()
-            if "node.name" in line:
+
+            if line.startswith("id "):
+                # Nuevo objeto, procesar el anterior
+                current_node = {}
+            elif "node.name" in line and "=" in line:
                 name = line.split("=", 1)[-1].strip().strip('"')
                 current_node["name"] = name
-            if "media.class" in line:
+            elif "media.class" in line and "=" in line:
                 media_class = line.split("=", 1)[-1].strip().strip('"')
                 current_node["class"] = media_class
 
+                # Audio/Source = micrófono
                 if media_class == "Audio/Source" and nodes["microphone"] is None:
-                    nodes["microphone"] = current_node.get("name")
-                elif media_class == "Audio/Source/Virtual" and nodes["monitor"] is None:
-                    nodes["monitor"] = current_node.get("name")
-                elif "Monitor" in media_class and nodes["monitor"] is None:
-                    nodes["monitor"] = current_node.get("name")
+                    if current_node.get("name"):
+                        nodes["microphone"] = current_node["name"]
 
-                current_node = {}
+                # Audio/Sink = salida de audio (capturamos su monitor)
+                # pw-record puede capturar el monitor de un sink directamente
+                elif media_class == "Audio/Sink" and nodes["monitor"] is None:
+                    if current_node.get("name"):
+                        nodes["monitor"] = current_node["name"]
 
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
@@ -128,11 +134,16 @@ class AudioRecorder:
         # Verificar espacio en disco antes de empezar
         self._storage.check_disk_space(min_mb=50)
 
-        # Verificar que pw-record está disponible
+        # Verificar que pw-record y parecord están disponibles
         if not shutil.which("pw-record"):
             raise PipeWireConnectionError(
                 "pw-record no está disponible. "
                 "Instala pipewire-utils dentro del contenedor."
+            )
+        if not shutil.which("parecord"):
+            raise PipeWireConnectionError(
+                "parecord no está disponible. "
+                "Instala pulseaudio-utils dentro del contenedor."
             )
 
         self._current_timestamp = self._storage.generate_timestamp()
@@ -174,13 +185,21 @@ class AudioRecorder:
         monitor_file = tmp_dir / f"{self._current_timestamp}_monitor_tmp.wav"
         if monitor_node:
             try:
+                # Usar parecord con el monitor del sink para capturar audio de salida digital.
+                # El nombre del monitor es el nombre del sink + ".monitor"
+                monitor_source = f"{monitor_node}.monitor"
                 self._monitor_process = subprocess.Popen(
-                    ["pw-record", "--target", monitor_node, str(monitor_file)],
+                    [
+                        "parecord",
+                        "--device", monitor_source,
+                        "--file-format=wav",
+                        str(monitor_file),
+                    ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.PIPE,
                 )
                 self._sources_captured.append("monitor")
-                logger.info("Capturando monitor desde nodo '%s'.", monitor_node)
+                logger.info("Capturando monitor desde sink '%s' (via parecord).", monitor_node)
             except OSError as e:
                 logger.warning("No se pudo iniciar captura del monitor: %s", e)
 

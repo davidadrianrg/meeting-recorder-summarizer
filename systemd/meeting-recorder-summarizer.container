@@ -1,7 +1,6 @@
 [Unit]
 Description=Meeting Recorder Summarizer Service
 Documentation=https://github.com/tu-usuario/meeting-recorder-summarizer
-# Esperar a que PipeWire esté disponible
 After=pipewire.service
 
 [Container]
@@ -9,15 +8,16 @@ Image=localhost/meeting-recorder-summarizer:latest
 ContainerName=meeting-recorder-summarizer
 
 # Volumen de datos: grabaciones, transcripciones, resúmenes y modelos de Whisper
-# %h = directorio home del usuario
 Volume=%h/meeting-recorder-summarizer-data:/data
 
-# Socket de PipeWire del host
-# %t = $XDG_RUNTIME_DIR (ej: /run/user/1000)
-Volume=%t/pipewire-0:/tmp/pipewire-0
+# Montar el runtime dir completo del host (contiene sockets de PipeWire y PulseAudio)
+# %t = $XDG_RUNTIME_DIR del host (ej: /run/user/1000)
+Volume=%t:/run/user/host
 
 # Variables de entorno del servicio
-Environment=XDG_RUNTIME_DIR=/tmp
+# XDG_RUNTIME_DIR apunta al runtime dir montado del host
+Environment=XDG_RUNTIME_DIR=/run/user/host
+Environment=PULSE_SERVER=unix:/run/user/host/pulse/native
 Environment=WHISPER_MODEL=base
 Environment=ENABLE_CUDA=false
 Environment=STORAGE_PATH=/data
@@ -31,7 +31,7 @@ Exec=serve
 # Mantener el UID del usuario del host dentro del contenedor
 UserNS=keep-id
 
-# Deshabilitar SELinux labeling para permitir acceso al socket de PipeWire
+# Deshabilitar SELinux labeling para permitir acceso a los sockets
 SecurityLabelDisable=true
 
 [Service]

@@ -6,9 +6,10 @@
 #
 # Ejecución manual (para pruebas):
 #   podman run --rm -it --userns keep-id \
-#     -v ~/meeting-recorder-summarizer-data:/data:Z \
-#     -v $XDG_RUNTIME_DIR/pipewire-0:/tmp/pipewire-0 \
-#     -e XDG_RUNTIME_DIR=/tmp \
+#     -v ~/meeting-recorder-summarizer-data:/data \
+#     -v $XDG_RUNTIME_DIR:/run/user/host \
+#     -e XDG_RUNTIME_DIR=/run/user/host \
+#     -e PULSE_SERVER=unix:/run/user/host/pulse/native \
 #     -e OPENAI_API_KEY=sk-... \
 #     meeting-recorder-summarizer
 #
@@ -25,6 +26,8 @@ RUN dnf install -y \
     python3.12 \
     pipewire \
     pipewire-utils \
+    pipewire-pulseaudio \
+    pulseaudio-utils \
     ffmpeg \
     && dnf clean all \
     && rm -rf /var/cache/dnf
@@ -53,7 +56,6 @@ VOLUME ["/data"]
 ENV WHISPER_MODEL=base
 ENV ENABLE_CUDA=false
 ENV STORAGE_PATH=/data
-ENV XDG_RUNTIME_DIR=/tmp
 
 # Punto de entrada - usar Python directamente del venv (evita que uv necesite caché)
 ENTRYPOINT ["/app/.venv/bin/python", "-m", "meeting_recorder"]

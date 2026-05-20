@@ -1,6 +1,6 @@
 # Meeting Recorder Summarizer
 
-Herramienta de grabación automática de reuniones para **Fedora Silverblue**. Graba el audio del sistema (micrófono + salida de aplicaciones como Teams), transcribe con Whisper local y genera resúmenes con bullet points usando la API de OpenAI.
+Herramienta de grabación automática de reuniones para **Fedora Silverblue**. Graba el audio del sistema (micrófono + salida digital de aplicaciones como Teams), transcribe con Whisper local y genera resúmenes con bullet points usando la API de OpenAI (gpt-5.4-nano).
 
 ## Requisitos del sistema
 
@@ -13,6 +13,27 @@ Herramienta de grabación automática de reuniones para **Fedora Silverblue**. G
 | API key | OpenAI API key (para resúmenes) |
 
 > **Nota**: La transcripción con Whisper funciona completamente en local sin conexión a internet. Solo el paso de resumen requiere la API de OpenAI.
+
+## Arquitectura
+
+El servicio se ejecuta dentro de un contenedor Podman rootless gestionado por systemd (Quadlet). El contenedor monta el `$XDG_RUNTIME_DIR` del host para acceder a los sockets de PipeWire y PulseAudio, lo que permite capturar tanto el micrófono como el audio de salida digital del sistema.
+
+```
+Host (Fedora Silverblue)              Contenedor Podman
+┌─────────────────────────┐          ┌──────────────────────────┐
+│ hotkey_controller.sh    │──exec──▶ │ cli.py (toggle/status)   │
+│ (Ctrl+Shift+R)          │          │         │                │
+│                         │          │         ▼ (socket Unix)  │
+│ systemd --user          │──manage─▶│ cli.py (serve) ← daemon  │
+│                         │          │   ├── recorder.py        │
+│ PipeWire ◀──socket────────────────▶│   │   ├── pw-record (mic)│
+│ PulseAudio ◀──socket──────────────▶│   │   └── parecord (out) │
+│                         │          │   ├── transcriber.py     │
+│                         │          │   ├── summarizer.py      │
+│ ~/meeting-recorder-     │◀──vol───▶│   └── /data             │
+│   summarizer-data/      │          └──────────────────────────┘
+└─────────────────────────┘
+```
 
 ## Estructura de archivos generados
 
@@ -100,7 +121,7 @@ systemctl --user start meeting-recorder-summarizer.service
 # Detener
 systemctl --user stop meeting-recorder-summarizer.service
 
-# Ver logs
+# Ver logs en tiempo real
 journalctl --user -u meeting-recorder-summarizer.service -f
 ```
 
@@ -108,10 +129,10 @@ journalctl --user -u meeting-recorder-summarizer.service -f
 
 ```bash
 # Consultar estado
-podman exec meeting-recorder-summarizer python -m meeting_recorder status
+podman exec meeting-recorder-summarizer /app/.venv/bin/python -m meeting_recorder status
 
 # Toggle manual (sin atajo de teclado)
-podman exec meeting-recorder-summarizer python -m meeting_recorder toggle
+podman exec meeting-recorder-summarizer /app/.venv/bin/python -m meeting_recorder toggle
 ```
 
 ## Variables de entorno
@@ -152,11 +173,22 @@ systemctl --user restart meeting-recorder-summarizer.service
 
 ### Habilitar GPU NVIDIA (opcional)
 
-Si tienes una GPU NVIDIA y el NVIDIA Container Toolkit instalado:
+Si tienes una GPU NVIDIA y el NVIDIA Container Toolkit instalado, edita el Quadlet:
 
 ```ini
 Environment=ENABLE_CUDA=true
 ```
+
+## Captura de audio
+
+El sistema captura dos fuentes de audio simultáneamente:
+
+- **Micrófono**: Usa `pw-record` via PipeWire para capturar la entrada de audio (tu voz).
+- **Salida del sistema**: Usa `parecord` (compatibilidad PulseAudio) con el monitor del sink para capturar el audio digital de salida (voces de los participantes remotos en Teams, etc.).
+
+Ambas fuentes se mezclan con `ffmpeg` (normalización de niveles) en un único archivo WAV 16kHz mono, optimizado para la transcripción con Whisper.
+
+Para que la captura funcione, el contenedor monta `$XDG_RUNTIME_DIR` del host, que contiene los sockets de PipeWire y PulseAudio. Se usa `--userns keep-id` para mantener los permisos del usuario y `SecurityLabelDisable=true` para evitar bloqueos de SELinux.
 
 ## Desarrollo
 
@@ -193,8 +225,8 @@ uv run pytest tests/test_config.py -v
 
 ```
 meeting-recorder-summarizer/
-├── Containerfile                              # Imagen del contenedor
-├── pyproject.toml                             # Dependencias Python (uv)
+├── Containerfile                              # Imagen del contenedor (Fedora 41)
+├── pyproject.toml                             # Dependencias Python (uv + hatchling)
 ├── README.md
 ├── check_ffmpeg.py                            # Utilidad de diagnóstico de ffmpeg
 ├── scripts/
@@ -205,18 +237,19 @@ meeting-recorder-summarizer/
 ├── meeting_recorder/
 │   ├── __init__.py
 │   ├── __main__.py                            # Entry point: python -m meeting_recorder
-│   ├── cli.py                                 # Comandos: toggle, status, serve
+│   ├── cli.py                                 # Daemon + comandos: toggle, status, serve
 │   ├── config.py                              # Configuración desde variables de entorno
 │   ├── exceptions.py                          # Jerarquía de excepciones
 │   ├── pipeline.py                            # Pipeline async: transcripción → resumen
-│   ├── recorder.py                            # Grabación de audio via PipeWire
+│   ├── recorder.py                            # Grabación: pw-record (mic) + parecord (monitor)
 │   ├── service.py                             # Servicio principal (estado IDLE/RECORDING)
 │   ├── storage.py                             # Gestión de directorios y timestamps
-│   ├── summarizer.py                          # Resúmenes con OpenAI API
+│   ├── summarizer.py                          # Resúmenes con OpenAI API (gpt-5.4-nano)
 │   └── transcriber.py                         # Transcripción con Whisper local
 └── tests/
     ├── test_config.py
     ├── test_pipeline.py
+    ├── test_recorder.py
     ├── test_service.py
     ├── test_storage.py
     ├── test_summarizer.py
@@ -238,10 +271,22 @@ meeting-recorder-summarizer/
    systemctl --user status pipewire
    ```
 
-3. Verifica que el socket de PipeWire está montado en el contenedor:
+3. Verifica que los sockets son accesibles dentro del contenedor:
    ```bash
-   podman exec meeting-recorder-summarizer ls /tmp/pipewire-0
+   podman exec meeting-recorder-summarizer ls -la /run/user/host/pipewire-0
+   podman exec meeting-recorder-summarizer ls -la /run/user/host/pulse/native
    ```
+
+### No se captura el audio de salida
+
+Verifica que `parecord` puede acceder al monitor del sink:
+```bash
+podman exec meeting-recorder-summarizer timeout 3 parecord \
+  --device=alsa_output.pci-0000_00_1f.3.hdmi-stereo.monitor \
+  --file-format=wav /tmp/test.wav
+```
+
+Si falla con "Connection refused", verifica que `PULSE_SERVER` y `XDG_RUNTIME_DIR` están configurados correctamente en el Quadlet.
 
 ### La transcripción es lenta
 
@@ -251,10 +296,10 @@ El modelo `base` es el equilibrio recomendado entre velocidad y precisión. Para
 
 Verifica que la API key está configurada:
 ```bash
-podman exec meeting-recorder-summarizer python -m meeting_recorder status
+podman exec meeting-recorder-summarizer /app/.venv/bin/python -m meeting_recorder status
 ```
 
-Si aparece un error de configuración, revisa `~/.config/environment.d/meeting-recorder-summarizer.conf`.
+Si aparece un error de configuración, revisa `~/.config/meeting-recorder-summarizer.env`.
 
 ### El atajo de teclado no funciona
 
@@ -267,3 +312,12 @@ Si no aparece, ejecuta de nuevo el instalador:
 ```bash
 ./scripts/install.sh
 ```
+
+### El servicio no arranca (Unit not found)
+
+Verifica que el Quadlet se procesa correctamente:
+```bash
+/usr/libexec/podman/quadlet --user --dryrun 2>&1
+```
+
+Si muestra errores, revisa la sintaxis del archivo en `~/.config/containers/systemd/meeting-recorder-summarizer.container`.

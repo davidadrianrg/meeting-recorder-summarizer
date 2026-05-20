@@ -1,0 +1,1 @@
+"""Tests para Meeting Recorder."""

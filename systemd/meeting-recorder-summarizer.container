@@ -1,0 +1,44 @@
+[Unit]
+Description=Meeting Recorder Summarizer Service
+Documentation=https://github.com/tu-usuario/meeting-recorder-summarizer
+# Esperar a que PipeWire esté disponible
+After=pipewire.service
+
+[Container]
+Image=localhost/meeting-recorder-summarizer:latest
+ContainerName=meeting-recorder-summarizer
+
+# Volumen de datos: grabaciones, transcripciones, resúmenes y modelos de Whisper
+# %h = directorio home del usuario
+Volume=%h/meeting-recorder-summarizer-data:/data
+
+# Socket de PipeWire del host
+# %t = $XDG_RUNTIME_DIR (ej: /run/user/1000)
+Volume=%t/pipewire-0:/tmp/pipewire-0
+
+# Variables de entorno del servicio
+Environment=XDG_RUNTIME_DIR=/tmp
+Environment=WHISPER_MODEL=base
+Environment=ENABLE_CUDA=false
+Environment=STORAGE_PATH=/data
+
+# OPENAI_API_KEY se lee desde un archivo de entorno del usuario
+EnvironmentFile=%h/.config/meeting-recorder-summarizer.env
+
+# Comando a ejecutar (serve = modo daemon esperando comandos)
+Exec=serve
+
+# Mantener el UID del usuario del host dentro del contenedor
+UserNS=keep-id
+
+# Deshabilitar SELinux labeling para permitir acceso al socket de PipeWire
+SecurityLabelDisable=true
+
+[Service]
+Restart=on-failure
+RestartSec=5
+StartLimitBurst=3
+StartLimitIntervalSec=60
+
+[Install]
+WantedBy=default.target

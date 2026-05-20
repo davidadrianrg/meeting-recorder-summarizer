@@ -62,7 +62,7 @@ class Summarizer:
         ConfigurationError: Si api_key está vacía o no definida.
     """
 
-    def __init__(self, api_key: str, model: str = "gpt-4o-mini") -> None:
+    def __init__(self, api_key: str, model: str = "gpt-5.4-nano") -> None:
         if not api_key or not api_key.strip():
             raise ConfigurationError(
                 "OPENAI_API_KEY no está definida o está vacía. "

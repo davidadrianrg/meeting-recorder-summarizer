@@ -91,7 +91,7 @@ class RecorderService:
             )
             summarizer = Summarizer(
                 api_key=self._config.openai_api_key,
-                model="gpt-4o-mini",
+                model="gpt-5.4-nano",
             )
             self._pipeline = ProcessingPipeline(transcriber, summarizer)
         return self._pipeline

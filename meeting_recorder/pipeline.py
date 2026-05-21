@@ -16,7 +16,7 @@ from meeting_recorder.transcriber import Transcriber
 
 logger = logging.getLogger(__name__)
 
-_STEP_TIMEOUT_SECONDS = 120
+_STEP_TIMEOUT_SECONDS = 7200
 _MAX_CONCURRENT = 3
 
 

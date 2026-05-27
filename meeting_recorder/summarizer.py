@@ -15,21 +15,37 @@ from meeting_recorder.exceptions import ConfigurationError, SummaryError
 logger = logging.getLogger(__name__)
 
 _SUMMARY_PROMPT = """\
-Eres un asistente especializado en resumir reuniones de trabajo.
-A continuación tienes la transcripción de una reunión de Teams.
+Eres un asistente experto en análisis de reuniones de trabajo. Tu tarea es generar un resumen estructurado y accionable a partir de la transcripción de una reunión.
 
-Genera un resumen en español con entre 5 y 15 viñetas (bullet points) que incluyan:
-- Decisiones tomadas durante la reunión
-- Tareas asignadas y responsables (si se mencionan)
-- Temas principales discutidos
-- Próximos pasos o fechas importantes (si se mencionan)
+Analiza la transcripción y genera un resumen en español con las siguientes secciones (omite las secciones que no apliquen):
 
-Formato de salida (Markdown):
 ## Resumen de la reunión
 
-- [viñeta 1]
-- [viñeta 2]
-...
+### Contexto
+Describe brevemente el propósito de la reunión y los participantes mencionados (si se identifican).
+
+### Decisiones tomadas
+- Lista las decisiones concretas que se acordaron durante la reunión.
+
+### Tareas y compromisos
+- Lista las tareas asignadas, indicando el responsable si se menciona, y la fecha límite si se establece.
+- Formato: [Responsable (si se conoce)] — Tarea — [Fecha límite (si se menciona)]
+
+### Puntos clave discutidos
+- Resume los temas principales que se trataron, priorizando los más relevantes.
+
+### Próximos pasos
+- Indica las acciones inmediatas o la fecha de la próxima reunión si se menciona.
+
+### Dudas o puntos pendientes
+- Lista cualquier tema que quedó sin resolver o que requiere seguimiento.
+
+Reglas:
+- Genera entre 5 y 20 viñetas en total entre todas las secciones.
+- Sé conciso pero específico. Evita generalidades vagas.
+- Si la transcripción tiene errores de reconocimiento de voz, interpreta el contexto para corregirlos.
+- Si no puedes identificar participantes, omite los nombres y enfócate en el contenido.
+- Usa lenguaje profesional y directo.
 
 Transcripción:
 {transcription}

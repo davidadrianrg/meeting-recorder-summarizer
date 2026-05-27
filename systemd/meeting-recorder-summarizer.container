@@ -18,6 +18,7 @@ Volume=%t:/run/user/host
 # XDG_RUNTIME_DIR apunta al runtime dir montado del host
 Environment=XDG_RUNTIME_DIR=/run/user/host
 Environment=PULSE_SERVER=unix:/run/user/host/pulse/native
+Environment=DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/host/bus
 Environment=WHISPER_MODEL=small
 Environment=ENABLE_CUDA=false
 Environment=STORAGE_PATH=/data

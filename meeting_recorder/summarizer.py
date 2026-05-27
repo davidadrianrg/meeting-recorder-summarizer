@@ -1,12 +1,15 @@
 """Generación de resúmenes de reuniones usando la API de OpenAI.
 
-Envía la transcripción a gpt-4o-mini y genera un resumen en formato
-Markdown con bullet points sobre decisiones, tareas y temas discutidos.
+Envía la transcripción a gpt-5.4-nano y genera un resumen en formato
+Markdown con secciones estructuradas sobre decisiones, tareas y temas discutidos.
+También genera un título corto para identificar la reunión.
 """
 
 from __future__ import annotations
 
 import logging
+import re
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -51,6 +54,41 @@ Transcripción:
 {transcription}
 """
 
+_TITLE_PROMPT = """\
+A partir de la siguiente transcripción de una reunión, genera un título corto (máximo 5 palabras) que identifique el tema principal de la reunión.
+
+Reglas:
+- Máximo 5 palabras, sin puntuación.
+- En español.
+- Descriptivo y específico (evita "Reunión de equipo" si puedes ser más concreto).
+- Solo responde con el título, nada más.
+
+Transcripción (primeros 500 caracteres):
+{transcription_preview}
+"""
+
+
+def _slugify(text: str, max_length: int = 50) -> str:
+    """Convierte un texto a un slug válido para nombres de archivo.
+
+    Args:
+        text: Texto a convertir.
+        max_length: Longitud máxima del slug.
+
+    Returns:
+        Slug en minúsculas con guiones, sin caracteres especiales.
+    """
+    # Normalizar Unicode y eliminar acentos
+    text = unicodedata.normalize("NFKD", text)
+    text = text.encode("ascii", "ignore").decode("ascii")
+    # Convertir a minúsculas y reemplazar espacios/caracteres especiales por guiones
+    text = text.lower().strip()
+    text = re.sub(r"[^a-z0-9\s-]", "", text)
+    text = re.sub(r"[\s_]+", "-", text)
+    text = re.sub(r"-+", "-", text)
+    text = text.strip("-")
+    return text[:max_length]
+
 
 @dataclass
 class SummaryResult:
@@ -60,11 +98,13 @@ class SummaryResult:
         content: Contenido Markdown del resumen.
         file_path: Ruta al archivo .md guardado.
         bullet_count: Número de viñetas en el resumen.
+        title: Título corto generado para identificar la reunión.
     """
 
     content: str
     file_path: Path
     bullet_count: int
+    title: str = ""
 
 
 class Summarizer:
@@ -72,7 +112,7 @@ class Summarizer:
 
     Args:
         api_key: Clave de API de OpenAI. No puede estar vacía.
-        model: Modelo de OpenAI a usar. Por defecto 'gpt-4o-mini'.
+        model: Modelo de OpenAI a usar. Por defecto 'gpt-5.4-nano'.
 
     Raises:
         ConfigurationError: Si api_key está vacía o no definida.
@@ -86,6 +126,38 @@ class Summarizer:
             )
         self._api_key = api_key
         self._model = model
+
+    def _generate_title(self, transcription_text: str) -> str:
+        """Genera un título corto para la reunión usando la API de OpenAI.
+
+        Args:
+            transcription_text: Texto de la transcripción.
+
+        Returns:
+            Título corto (slug) para usar en nombres de archivo.
+        """
+        try:
+            from openai import OpenAI
+        except ImportError:
+            return ""
+
+        client = OpenAI(api_key=self._api_key, timeout=30.0)
+        preview = transcription_text[:500]
+        prompt = _TITLE_PROMPT.format(transcription_preview=preview)
+
+        try:
+            response = client.chat.completions.create(
+                model=self._model,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                max_tokens=30,
+            )
+            raw_title = response.choices[0].message.content or ""
+            raw_title = raw_title.strip().strip('"').strip(".")
+            return _slugify(raw_title)
+        except Exception as e:
+            logger.warning("No se pudo generar título para la reunión: %s", e)
+            return ""
 
     def summarize(
         self,
@@ -101,7 +173,7 @@ class Summarizer:
             timestamp: Prefijo temporal (YYYY-MM-DD_HH-MM-SS) para el nombre del archivo.
 
         Returns:
-            SummaryResult con el contenido, ruta del archivo y número de viñetas.
+            SummaryResult con el contenido, ruta del archivo, viñetas y título.
 
         Raises:
             SummaryError: Si la API de OpenAI no responde en 60 segundos o retorna error.
@@ -133,6 +205,9 @@ class Summarizer:
         content = response.choices[0].message.content or ""
         bullet_count = content.count("\n-")
 
+        # Generar título descriptivo para la reunión
+        title = self._generate_title(transcription_text)
+
         output_path = output_dir / f"{timestamp}.md"
         try:
             output_path.write_text(content, encoding="utf-8")
@@ -146,4 +221,5 @@ class Summarizer:
             content=content,
             file_path=output_path,
             bullet_count=bullet_count,
+            title=title,
         )

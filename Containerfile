@@ -29,6 +29,7 @@ RUN dnf install -y \
     pipewire-pulseaudio \
     pulseaudio-utils \
     ffmpeg \
+    libnotify \
     && dnf clean all \
     && rm -rf /var/cache/dnf
 

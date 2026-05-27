@@ -206,6 +206,7 @@ class ProcessingPipeline:
 
         # Paso 3: Renombrar archivos con título descriptivo
         title_slug = summary_result.title
+        logger.info("Título para renombrado: '%s'", title_slug)
         if title_slug:
             _rename_session_files(
                 audio_path=audio_path,

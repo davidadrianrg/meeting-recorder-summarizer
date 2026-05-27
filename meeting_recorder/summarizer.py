@@ -150,11 +150,13 @@ class Summarizer:
                 model=self._model,
                 messages=[{"role": "user", "content": prompt}],
                 temperature=0.2,
-                max_tokens=30,
+                max_completion_tokens=30,
             )
             raw_title = response.choices[0].message.content or ""
             raw_title = raw_title.strip().strip('"').strip(".")
-            return _slugify(raw_title)
+            slug = _slugify(raw_title)
+            logger.info("Título generado: '%s' → slug: '%s'", raw_title, slug)
+            return slug
         except Exception as e:
             logger.warning("No se pudo generar título para la reunión: %s", e)
             return ""
